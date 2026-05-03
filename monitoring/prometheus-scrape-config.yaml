@@ -1,0 +1,34 @@
+# Prometheus scrape configuration for CoreDNS node-local static pods.
+#
+# Option A: Static targets (simplest, for demo)
+# Replace the IPs with your actual node IPs from `make deploy` output.
+scrape_configs:
+  - job_name: 'coredns-local'
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+        # Replace these with actual node IPs
+        - '<control-plane-ip>:9153'
+        - '<worker-1-ip>:9153'
+        - '<worker-2-ip>:9153'
+        labels:
+          cluster: 'custom-dns'
+
+# Option B: Kubernetes SD (for clusters with Prometheus Operator)
+# Uncomment and use this if you deploy Prometheus inside the cluster.
+#
+# scrape_configs:
+#   - job_name: 'coredns-local'
+#     kubernetes_sd_configs:
+#     - role: pod
+#     relabel_configs:
+#     - source_labels: [__meta_kubernetes_pod_label_app]
+#       regex: coredns-local
+#       action: keep
+#     - source_labels: [__meta_kubernetes_pod_ip]
+#       target_label: __address__
+#       replacement: '${1}:9153'
+#     - source_labels: [__meta_kubernetes_namespace]
+#       target_label: namespace
+#     - source_labels: [__meta_kubernetes_pod_node_name]
+#       target_label: node

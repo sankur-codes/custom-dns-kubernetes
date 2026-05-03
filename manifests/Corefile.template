@@ -1,0 +1,29 @@
+. {
+    errors
+    bufsize 512
+    health :18080
+    prometheus :9153
+
+    template IN A api.__DOMAIN__ {
+        answer "{{ .Name }} 30 IN A __API_IP__"
+    }
+
+    template IN A api-int.__DOMAIN__ {
+        answer "{{ .Name }} 30 IN A __API_IP__"
+    }
+
+    template IN A apps.__DOMAIN__ {
+        match .*\.apps\.__DOMAIN_REGEX__
+        answer "{{ .Name }} 30 IN A __INGRESS_IP__"
+    }
+
+    hosts {
+        fallthrough
+    }
+
+    forward . __UPSTREAM_DNS__ {
+        policy sequential
+    }
+
+    cache 30
+}

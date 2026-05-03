@@ -1,0 +1,11 @@
+# Runtime state (contains IPs discovered during setup)
+.env.kind
+azure/.env
+azure/kubeconfig
+
+# Generated
+kind-config.yaml
+
+# metedata
+demo.md 
+
