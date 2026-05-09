@@ -1,0 +1,283 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 10s
+      evaluation_interval: 10s
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    scrape_configs:
+      - job_name: 'coredns-local'
+        kubernetes_sd_configs:
+        - role: pod
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          regex: coredns-local
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: '${1}:9153'
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          target_label: node
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: monitoring
+data:
+  dns-alerts.yml: |
+    groups:
+    - name: coredns.availability
+      rules:
+      - alert: CoreDNSDown
+        expr: up{job="coredns-local"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CoreDNS instance down on {{ $labels.node }}"
+          description: "CoreDNS on node {{ $labels.node }} has been unreachable for more than 1 minute."
+
+      - alert: CoreDNSRestarted
+        expr: increase(process_start_time_seconds{job="coredns-local"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CoreDNS restarted on {{ $labels.node }}"
+          description: "CoreDNS on node {{ $labels.node }} has restarted in the last 5 minutes."
+
+    - name: coredns.errors
+      rules:
+      - alert: CoreDNSHighSERVFAILRate
+        expr: |
+          sum by (node) (rate(coredns_dns_responses_total{job="coredns-local",rcode="SERVFAIL"}[5m]))
+          /
+          sum by (node) (rate(coredns_dns_responses_total{job="coredns-local"}[5m]))
+          > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High SERVFAIL rate on {{ $labels.node }}"
+          description: "More than 1% of DNS responses on {{ $labels.node }} are SERVFAIL for the last 5 minutes. Current rate: {{ $value | humanizePercentage }}."
+
+      - alert: CoreDNSHighNXDOMAINRate
+        expr: |
+          sum by (node) (rate(coredns_dns_responses_total{job="coredns-local",rcode="NXDOMAIN"}[5m]))
+          /
+          sum by (node) (rate(coredns_dns_responses_total{job="coredns-local"}[5m]))
+          > 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High NXDOMAIN rate on {{ $labels.node }}"
+          description: "More than 10% of DNS responses on {{ $labels.node }} are NXDOMAIN. Possible misconfiguration. Current rate: {{ $value | humanizePercentage }}."
+
+    - name: coredns.latency
+      rules:
+      - alert: CoreDNSLatencyP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, node) (rate(coredns_dns_request_duration_seconds_bucket{job="coredns-local"}[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High DNS p99 latency on {{ $labels.node }}"
+          description: "DNS p99 request latency on {{ $labels.node }} exceeds 100ms for the last 5 minutes. Current p99: {{ $value | humanizeDuration }}."
+
+      - alert: CoreDNSForwardLatencyP99High
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, node) (rate(coredns_forward_request_duration_seconds_bucket{job="coredns-local"}[5m]))
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High forward p99 latency on {{ $labels.node }}"
+          description: "DNS forward p99 latency on {{ $labels.node }} exceeds 500ms. Upstream DNS may be degraded. Current p99: {{ $value | humanizeDuration }}."
+
+    - name: coredns.cache
+      rules:
+      - alert: CoreDNSCacheHitRateLow
+        expr: |
+          sum by (node) (rate(coredns_cache_hits_total{job="coredns-local"}[10m]))
+          /
+          (
+            sum by (node) (rate(coredns_cache_hits_total{job="coredns-local"}[10m]))
+            +
+            sum by (node) (rate(coredns_cache_misses_total{job="coredns-local"}[10m]))
+          )
+          < 0.5
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low cache hit rate on {{ $labels.node }}"
+          description: "DNS cache hit rate on {{ $labels.node }} is below 50% over 10 minutes. Current: {{ $value | humanizePercentage }}."
+
+    - name: coredns.slo
+      rules:
+      # SLI: Availability — fraction of successful responses (non-SERVFAIL)
+      - record: coredns:dns_availability:ratio_rate5m
+        expr: |
+          1 - (
+            sum by (node) (rate(coredns_dns_responses_total{job="coredns-local",rcode="SERVFAIL"}[5m]))
+            /
+            sum by (node) (rate(coredns_dns_responses_total{job="coredns-local"}[5m]))
+          )
+
+      # SLI: Latency — fraction of requests served within 100ms
+      - record: coredns:dns_latency_sli:ratio_rate5m
+        expr: |
+          sum by (node) (rate(coredns_dns_request_duration_seconds_bucket{job="coredns-local",le="0.1"}[5m]))
+          /
+          sum by (node) (rate(coredns_dns_request_duration_seconds_count{job="coredns-local"}[5m]))
+
+      # SLO breach: availability drops below 99.9%
+      - alert: CoreDNSAvailabilitySLOBreach
+        expr: coredns:dns_availability:ratio_rate5m < 0.999
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DNS availability SLO breach on {{ $labels.node }}"
+          description: "DNS availability on {{ $labels.node }} has dropped below 99.9% SLO. Current: {{ $value | humanizePercentage }}."
+
+      # SLO breach: latency SLI drops below 99% of requests within 100ms
+      - alert: CoreDNSLatencySLOBreach
+        expr: coredns:dns_latency_sli:ratio_rate5m < 0.99
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DNS latency SLO breach on {{ $labels.node }}"
+          description: "Less than 99% of DNS requests on {{ $labels.node }} are served within 100ms. Current: {{ $value | humanizePercentage }}."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.53.0
+        args:
+        - "--config.file=/etc/prometheus/prometheus.yml"
+        - "--storage.tsdb.path=/prometheus"
+        - "--storage.tsdb.retention.time=24h"
+        - "--web.enable-lifecycle"
+        ports:
+        - containerPort: 9090
+          name: http
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus/prometheus.yml
+          subPath: prometheus.yml
+        - name: rules
+          mountPath: /etc/prometheus/rules
+        - name: data
+          mountPath: /prometheus
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9090
+          initialDelaySeconds: 15
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+      - name: rules
+        configMap:
+          name: prometheus-alerts
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  selector:
+    app: prometheus
+  ports:
+  - port: 9090
+    targetPort: 9090
+    name: http

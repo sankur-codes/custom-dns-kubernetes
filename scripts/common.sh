@@ -71,7 +71,7 @@ save_config() {
     local file="$1"; shift
     : > "$file"
     for var in "$@"; do
-        echo "${var}=${!var}" >> "$file"
+        echo "${var}=\"${!var}\"" >> "$file"
     done
 }
 

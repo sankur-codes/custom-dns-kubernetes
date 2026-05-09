@@ -1,0 +1,389 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Total DNS Queries/sec",
+      "type": "stat",
+      "targets": [{
+        "expr": "sum(rate(coredns_dns_requests_total{job=\"coredns-local\"}[5m]))",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 5 }
+          ]},
+          "unit": "percentunit",
+          "max": 1
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Error Rate (SERVFAIL)",
+      "type": "stat",
+      "targets": [{
+        "expr": "sum(rate(coredns_dns_responses_total{job=\"coredns-local\",rcode=\"SERVFAIL\"}[5m])) / sum(rate(coredns_dns_responses_total{job=\"coredns-local\"}[5m])) or vector(0)",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]},
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "CoreDNS Instances Up",
+      "type": "stat",
+      "targets": [{
+        "expr": "count(up{job=\"coredns-local\"} == 1)",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 0.5 },
+            { "color": "green", "value": 0.8 }
+          ]},
+          "unit": "percentunit",
+          "max": 1
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Cache Hit Rate",
+      "type": "stat",
+      "targets": [{
+        "expr": "sum(rate(coredns_cache_hits_total{job=\"coredns-local\"}[5m])) / (sum(rate(coredns_cache_hits_total{job=\"coredns-local\"}[5m])) + sum(rate(coredns_cache_misses_total{job=\"coredns-local\"}[5m]))) or vector(0)",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "SLI / SLO",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 0.99 },
+            { "color": "green", "value": 0.999 }
+          ]},
+          "unit": "percentunit",
+          "decimals": 4,
+          "max": 1,
+          "min": 0.99
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 6 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Availability SLI (target: 99.9%)",
+      "type": "stat",
+      "targets": [{
+        "expr": "avg(coredns:dns_availability:ratio_rate5m) or vector(1)",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 0.95 },
+            { "color": "green", "value": 0.99 }
+          ]},
+          "unit": "percentunit",
+          "decimals": 2,
+          "max": 1,
+          "min": 0.9
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 6 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Latency SLI: % < 100ms (target: 99%)",
+      "type": "stat",
+      "targets": [{
+        "expr": "avg(coredns:dns_latency_sli:ratio_rate5m) or vector(1)",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.01 },
+            { "color": "red", "value": 0.05 }
+          ]},
+          "unit": "s",
+          "decimals": 1
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 6 },
+      "id": 7,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "p99 Latency",
+      "type": "stat",
+      "targets": [{
+        "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+        "legendFormat": ""
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+      "id": 102,
+      "title": "Queries",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Queries/sec by Zone",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (zone) (rate(coredns_dns_requests_total{job=\"coredns-local\"}[5m]))",
+        "legendFormat": "{{ zone }}"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Responses/sec by Code",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (rcode) (rate(coredns_dns_responses_total{job=\"coredns-local\"}[5m]))",
+        "legendFormat": "{{ rcode }}"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Queries/sec by Node",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (node) (rate(coredns_dns_requests_total{job=\"coredns-local\"}[5m]))",
+        "legendFormat": "{{ node }}"
+      }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Queries/sec by Type",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (type) (rate(coredns_dns_requests_total{job=\"coredns-local\"}[5m]))",
+        "legendFormat": "{{ type }}"
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 103,
+      "title": "Latency",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "DNS Request Latency (all zones)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Forward Request Latency (upstream DNS)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(coredns_forward_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(coredns_forward_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_forward_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "DNS Request Latency by Zone (p99)",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "histogram_quantile(0.99, sum by (le, zone) (rate(coredns_dns_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+        "legendFormat": "{{ zone }}"
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 44 },
+      "id": 104,
+      "title": "Cache & Forwarding",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Cache Hits vs Misses",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(coredns_cache_hits_total{job=\"coredns-local\"}[5m]))",
+          "legendFormat": "Hits"
+        },
+        {
+          "expr": "sum(rate(coredns_cache_misses_total{job=\"coredns-local\"}[5m]))",
+          "legendFormat": "Misses"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "table", "calcs": ["mean", "max"] } },
+      "title": "Forward Requests/sec by Upstream",
+      "type": "timeseries",
+      "targets": [{
+        "expr": "sum by (to) (rate(coredns_forward_requests_total{job=\"coredns-local\"}[5m]))",
+        "legendFormat": "{{ to }}"
+      }]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["dns", "coredns", "custom-dns"],
+  "templating": {
+    "list": [{
+      "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+      "hide": 2,
+      "name": "DS_PROMETHEUS",
+      "type": "datasource",
+      "query": "prometheus"
+    }]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "CoreDNS - Custom DNS Observability",
+  "uid": "coredns-custom-dns",
+  "version": 1
+}

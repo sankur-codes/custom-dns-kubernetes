@@ -1,21 +1,30 @@
+api.__DOMAIN__ {
+    prometheus
+    template IN A api.__DOMAIN__ {
+        answer "{{ .Name }} 30 IN A __API_IP__"
+    }
+}
+
+api-int.__DOMAIN__ {
+    prometheus
+    template IN A api-int.__DOMAIN__ {
+        answer "{{ .Name }} 30 IN A __API_IP__"
+    }
+}
+
+apps.__DOMAIN__ {
+    prometheus
+    template IN A apps.__DOMAIN__ {
+        match .*\.apps\.__DOMAIN_REGEX__
+        answer "{{ .Name }} 30 IN A __INGRESS_IP__"
+    }
+}
+
 . {
     errors
     bufsize 512
     health :18080
     prometheus :9153
-
-    template IN A api.__DOMAIN__ {
-        answer "{{ .Name }} 30 IN A __API_IP__"
-    }
-
-    template IN A api-int.__DOMAIN__ {
-        answer "{{ .Name }} 30 IN A __API_IP__"
-    }
-
-    template IN A apps.__DOMAIN__ {
-        match .*\.apps\.__DOMAIN_REGEX__
-        answer "{{ .Name }} 30 IN A __INGRESS_IP__"
-    }
 
     hosts {
         fallthrough
