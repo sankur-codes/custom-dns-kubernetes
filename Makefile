@@ -8,6 +8,7 @@ export KIND_EXPERIMENTAL_PROVIDER := $(CONTAINER_CLI)
 
 .PHONY: help prereqs cluster-up deploy verify demo demo-failover status clean \
         traffic traffic-stop \
+        demo-apps demo-apps-clean \
         monitoring prometheus-ui grafana-ui \
         azure-infra azure-cluster azure-deploy azure-verify azure-failover \
         azure-demo azure-status azure-clean
@@ -107,6 +108,15 @@ clean: ## Delete the Kind cluster and generated files
 	@kind delete cluster --name $(CLUSTER_NAME) 2>/dev/null || true
 	@rm -f kind-config.yaml
 	@echo "Cluster '$(CLUSTER_NAME)' deleted."
+
+demo-apps: ## Deploy demo application services (web, api, cache, db)
+	@chmod +x scripts/deploy-demo-apps.sh
+	@./scripts/deploy-demo-apps.sh
+
+demo-apps-clean: ## Remove demo application services
+	@kubectl delete namespace demo-apps --context kind-$(CLUSTER_NAME) 2>/dev/null && \
+		echo "Demo apps namespace deleted." || \
+		echo "Demo apps namespace not found."
 
 # ═══════════════════════════════════════════════════════════════════
 #  Monitoring targets

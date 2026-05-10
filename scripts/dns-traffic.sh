@@ -60,7 +60,7 @@ TRAFFIC_CACHED_COUNT="${TRAFFIC_CACHED_COUNT:-8}"
 TRAFFIC_FORWARD_COUNT="${TRAFFIC_FORWARD_COUNT:-5}"
 TRAFFIC_NXDOMAIN_COUNT="${TRAFFIC_NXDOMAIN_COUNT:-3}"
 TRAFFIC_EVICT_COUNT="${TRAFFIC_EVICT_COUNT:-0}"
-TRAFFIC_CLUSTER_COUNT="${TRAFFIC_CLUSTER_COUNT:-3}"
+TRAFFIC_CLUSTER_COUNT="${TRAFFIC_CLUSTER_COUNT:-4}"
 TRAFFIC_STATS_EVERY="${TRAFFIC_STATS_EVERY:-10}"
 
 # ── PID file + signal handling ─────────────────────────────────────
@@ -130,6 +130,10 @@ CLUSTER_DOMAINS=(
     "kube-dns.kube-system.svc.cluster.local"
     "prometheus.monitoring.svc.cluster.local"
     "grafana.monitoring.svc.cluster.local"
+    "web-frontend.demo-apps.svc.cluster.local"
+    "api-backend.demo-apps.svc.cluster.local"
+    "redis-cache.demo-apps.svc.cluster.local"
+    "postgres-db.demo-apps.svc.cluster.local"
 )
 
 # ── Counters ───────────────────────────────────────────────────────
