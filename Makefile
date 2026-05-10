@@ -7,6 +7,7 @@ include config.env
 export KIND_EXPERIMENTAL_PROVIDER := $(CONTAINER_CLI)
 
 .PHONY: help prereqs cluster-up deploy verify demo demo-failover status clean \
+        traffic traffic-stop \
         monitoring prometheus-ui grafana-ui \
         azure-infra azure-cluster azure-deploy azure-verify azure-failover \
         azure-demo azure-status azure-clean
@@ -69,6 +70,25 @@ demo: cluster-up deploy verify ## Full demo: create cluster, deploy CoreDNS, ver
 demo-failover: ## Simulate upstream DNS failure (cluster domains survive)
 	@chmod +x scripts/demo-failover.sh
 	@./scripts/demo-failover.sh
+
+traffic: ## Start continuous DNS traffic generator (background)
+	@chmod +x scripts/dns-traffic.sh
+	@./scripts/dns-traffic.sh --background
+
+traffic-stop: ## Stop the DNS traffic generator
+	@PIDFILE="/tmp/dns-traffic-$(CLUSTER_NAME).pid"; \
+	if [ -f "$$PIDFILE" ]; then \
+		PID=$$(cat "$$PIDFILE"); \
+		if kill -0 "$$PID" 2>/dev/null; then \
+			kill "$$PID"; \
+			echo "Traffic generator stopped (PID $$PID)."; \
+		else \
+			echo "Traffic generator not running (stale PID file)."; \
+			rm -f "$$PIDFILE"; \
+		fi; \
+	else \
+		echo "No traffic generator running (no PID file found)."; \
+	fi
 
 status: ## Show cluster and CoreDNS pod status
 	@echo "Cluster: $(CLUSTER_NAME)"
