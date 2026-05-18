@@ -6,10 +6,10 @@ include config.env
 # Kind needs this env var when using Podman
 export KIND_EXPERIMENTAL_PROVIDER := $(CONTAINER_CLI)
 
-.PHONY: help prereqs cluster-up deploy verify demo demo-failover status clean \
+.PHONY: help prereqs cluster-up deploy verify demo demo-failover walkthrough status clean \
         traffic traffic-stop \
-        demo-apps demo-apps-clean \
-        monitoring prometheus-ui grafana-ui \
+        demo-apps demo-apps-clean dns-test \
+        monitoring prometheus-ui grafana-ui port-forward port-forward-stop \
         azure-infra azure-cluster azure-deploy azure-verify azure-failover \
         azure-demo azure-status azure-clean
 
@@ -66,7 +66,11 @@ verify: ## Run DNS verification tests on all nodes
 	@chmod +x scripts/verify-dns.sh
 	@./scripts/verify-dns.sh
 
-demo: cluster-up deploy verify ## Full demo: create cluster, deploy CoreDNS, verify
+demo: cluster-up deploy verify demo-apps dns-test monitoring port-forward ## Full demo: cluster, CoreDNS, apps, monitoring, dashboards
+
+walkthrough: ## Interactive feature walkthrough (run after 'make demo')
+	@chmod +x scripts/walkthrough.sh
+	@./scripts/walkthrough.sh
 
 demo-failover: ## Simulate upstream DNS failure (cluster domains survive)
 	@chmod +x scripts/demo-failover.sh
@@ -104,7 +108,7 @@ status: ## Show cluster and CoreDNS pod status
 	@echo "All kube-system pods:"
 	@kubectl get pods -n kube-system --context kind-$(CLUSTER_NAME) 2>/dev/null || true
 
-clean: ## Delete the Kind cluster and generated files
+clean: port-forward-stop ## Delete the Kind cluster and generated files
 	@kind delete cluster --name $(CLUSTER_NAME) 2>/dev/null || true
 	@rm -f kind-config.yaml
 	@echo "Cluster '$(CLUSTER_NAME)' deleted."
@@ -118,6 +122,13 @@ demo-apps-clean: ## Remove demo application services
 		echo "Demo apps namespace deleted." || \
 		echo "Demo apps namespace not found."
 
+dns-test: ## Create a DNS test pod for interactive queries
+	@kubectl run dns-test --image=busybox:1.36 --restart=Never \
+		--context kind-$(CLUSTER_NAME) -- sleep 86400 2>/dev/null || true
+	@kubectl wait --for=condition=Ready pod/dns-test \
+		--context kind-$(CLUSTER_NAME) --timeout=30s 2>/dev/null
+	@echo "dns-test pod ready."
+
 # ═══════════════════════════════════════════════════════════════════
 #  Monitoring targets
 # ═══════════════════════════════════════════════════════════════════
@@ -126,15 +137,49 @@ monitoring: ## Deploy Prometheus + Grafana monitoring stack
 	@chmod +x scripts/deploy-monitoring.sh
 	@./scripts/deploy-monitoring.sh
 
-prometheus-ui: ## Open Prometheus UI (port-forward to localhost:9090)
-	@echo "Prometheus available at http://localhost:9090"
+prometheus-ui: ## Open Prometheus UI (foreground, port-forward)
+	@echo "Prometheus available at http://localhost:$(PROMETHEUS_PORT)"
 	@echo "Press Ctrl+C to stop"
-	@kubectl port-forward -n monitoring svc/prometheus 9090:9090 --context kind-$(CLUSTER_NAME)
+	@kubectl port-forward -n monitoring svc/prometheus $(PROMETHEUS_PORT):9090 --context kind-$(CLUSTER_NAME)
 
-grafana-ui: ## Open Grafana UI (port-forward to localhost:3000)
-	@echo "Grafana available at http://localhost:3000"
+grafana-ui: ## Open Grafana UI (foreground, port-forward)
+	@echo "Grafana available at http://localhost:$(GRAFANA_PORT)"
 	@echo "Press Ctrl+C to stop"
-	@kubectl port-forward -n monitoring svc/grafana 3000:3000 --context kind-$(CLUSTER_NAME)
+	@kubectl port-forward -n monitoring svc/grafana $(GRAFANA_PORT):3000 --context kind-$(CLUSTER_NAME)
+
+port-forward: ## Start Prometheus + Grafana port-forwards in background
+	@for PF in prometheus grafana; do \
+		PIDFILE="/tmp/$${PF}-pf-$(CLUSTER_NAME).pid"; \
+		if [ -f "$$PIDFILE" ] && kill -0 $$(cat "$$PIDFILE") 2>/dev/null; then \
+			echo "$$PF port-forward already running (PID $$(cat $$PIDFILE))."; \
+		else \
+			rm -f "$$PIDFILE"; \
+			if [ "$$PF" = "prometheus" ]; then \
+				kubectl port-forward -n monitoring svc/prometheus $(PROMETHEUS_PORT):9090 --context kind-$(CLUSTER_NAME) &>/dev/null & \
+			else \
+				kubectl port-forward -n monitoring svc/grafana $(GRAFANA_PORT):3000 --context kind-$(CLUSTER_NAME) &>/dev/null & \
+			fi; \
+			echo $$! > "$$PIDFILE"; \
+		fi; \
+	done
+	@echo ""
+	@echo "  Prometheus:  http://localhost:$(PROMETHEUS_PORT)"
+	@echo "  Grafana:     http://localhost:$(GRAFANA_PORT)"
+	@echo ""
+	@echo "  Stop with: make port-forward-stop"
+
+port-forward-stop: ## Stop background port-forwards
+	@for PF in prometheus grafana; do \
+		PIDFILE="/tmp/$${PF}-pf-$(CLUSTER_NAME).pid"; \
+		if [ -f "$$PIDFILE" ]; then \
+			PID=$$(cat "$$PIDFILE"); \
+			if kill -0 "$$PID" 2>/dev/null; then \
+				kill "$$PID"; \
+				echo "$$PF port-forward stopped (PID $$PID)."; \
+			fi; \
+			rm -f "$$PIDFILE"; \
+		fi; \
+	done
 
 # ═══════════════════════════════════════════════════════════════════
 #  Azure targets

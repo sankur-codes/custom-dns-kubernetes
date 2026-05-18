@@ -66,14 +66,14 @@ TRAFFIC_STATS_EVERY="${TRAFFIC_STATS_EVERY:-10}"
 # ── PID file + signal handling ─────────────────────────────────────
 
 echo $$ > "$PIDFILE"
-RUNNING=true
+RUNNING=1
 
 cleanup() {
     rm -f "$PIDFILE"
     print_final_stats
 }
 trap cleanup EXIT
-trap 'RUNNING=false' SIGTERM SIGINT
+trap 'RUNNING=0' SIGTERM SIGINT
 
 # ── Discover nodes ─────────────────────────────────────────────────
 
@@ -189,7 +189,7 @@ echo ""
 
 # ── Main loop ──────────────────────────────────────────────────────
 
-while $RUNNING; do
+while (( RUNNING )); do
     BATCH_NUM=$((BATCH_NUM + 1))
 
     # Category 1: Local domain queries (address records / local responses)

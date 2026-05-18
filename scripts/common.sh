@@ -43,6 +43,20 @@ confirm() {
     esac
 }
 
+# pause ["message"] — wait for any keypress. For interactive demos.
+pause() {
+    local msg="${1:-Press any key to continue...}"
+    echo ""
+    echo -en "${_YELLOW}▸ ${msg}${_RESET} "
+    read -r -s -n 1
+    echo ""
+}
+
+# show_cmd CMD... — print a command in a styled way for demos.
+show_cmd() {
+    echo -e "  ${_BLUE}\$ $*${_RESET}"
+}
+
 # ── Config helpers ──────────────────────────────────────────────────
 
 # load_project_config — source the central config.env file.
