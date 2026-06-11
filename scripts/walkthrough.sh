@@ -5,8 +5,13 @@
 # Assumes `make demo` has already been run (cluster up, CoreDNS deployed,
 # demo-apps deployed, monitoring deployed, port-forwards running).
 #
-# Walks through every feature with pauses between steps, showing the
-# command before executing it. Press any key to advance.
+# Focuses on CoreDNS-specific differentiators:
+#   - Static pod architecture (kubelet-managed, two CoreDNS instances)
+#   - Native Prometheus observability (per-zone metrics, latency histograms)
+#   - Resilience (kill + auto-restart, manifest removal/restoration)
+#
+# DNS resolution basics (domain checks, forwarding, caching behavior,
+# failover) are covered by the dnsmasq walkthrough and not repeated here.
 #
 # Usage: ./walkthrough.sh
 
@@ -55,6 +60,14 @@ echo "  Control-plane: ${CP_NODE} (${CP_IP})"
 echo "  Worker:      ${WORKER_NODE} (${WORKER_IP})"
 echo "  Prometheus:  http://localhost:${PROMETHEUS_PORT}"
 echo "  Grafana:     http://localhost:${GRAFANA_PORT}"
+echo ""
+echo "  This walkthrough focuses on CoreDNS differentiators:"
+echo "    - Static pod architecture & kubelet management"
+echo "    - Native Prometheus observability (per-zone, latency, cache)"
+echo "    - Self-healing resilience (process kill, manifest removal)"
+echo ""
+echo "  DNS resolution basics (domain checks, forwarding, caching,"
+echo "  failover) are covered in the dnsmasq walkthrough."
 
 pause "Start the walkthrough?"
 
@@ -156,144 +169,13 @@ echo "    - . (catch-all)       → forwards to upstream DNS, caches 30s"
 echo ""
 echo "  Each block includes 'prometheus' — per-zone metrics with zero config."
 
-pause "Next: DNS configuration (resolv.conf)"
-
-# ═══════════════════════════════════════════════════════════════════
-#  4. DNS Configuration (resolv.conf)
-# ═══════════════════════════════════════════════════════════════════
-
-header "4. DNS Configuration"
-
-echo "  Each node's /etc/resolv.conf points to its own CoreDNS (local IP first)."
-echo ""
-show_cmd "${CLI} exec ${CP_NODE} cat /etc/resolv.conf"
-
-pause
-
-echo -e "  ${_BOLD}Current /etc/resolv.conf:${_RESET}"
-$CLI exec "$CP_NODE" cat /etc/resolv.conf
-echo ""
-echo -e "  ${_BOLD}Original (before custom DNS):${_RESET}"
-$CLI exec "$CP_NODE" cat /etc/resolv.conf.upstream
-
-pause "Next: local DNS resolution"
-
-# ═══════════════════════════════════════════════════════════════════
-#  5. Local DNS Resolution
-# ═══════════════════════════════════════════════════════════════════
-
-header "5. Local DNS Resolution"
-
-echo "  Cluster infrastructure domains resolve locally via CoreDNS template"
-echo "  records. No upstream DNS involved — sub-millisecond response."
-echo ""
-
-for QDOMAIN in "api.${DOMAIN}" "api-int.${DOMAIN}" "myapp.apps.${DOMAIN}"; do
-    show_cmd "${CLI} exec ${CP_NODE} dig +short ${QDOMAIN} @${CP_IP}"
-done
-
-pause
-
-echo ""
-for QDOMAIN in "api.${DOMAIN}" "api-int.${DOMAIN}" "myapp.apps.${DOMAIN}"; do
-    RESULT=$($CLI exec "$CP_NODE" dig +short +timeout=3 "$QDOMAIN" "@${CP_IP}" 2>/dev/null)
-    echo -e "  ${QDOMAIN}  ->  ${_GREEN}${RESULT:-FAIL}${_RESET}"
-done
-
-echo ""
-echo "  Full dig output — notice the 'aa' flag (Authoritative Answer):"
-echo ""
-show_cmd "${CLI} exec ${CP_NODE} dig api.${DOMAIN} @${CP_IP}"
-
-pause
-
-$CLI exec "$CP_NODE" dig "api.${DOMAIN}" "@${CP_IP}" 2>/dev/null
-
-echo ""
-echo "  Key markers:"
-echo "    - 'aa' flag: this node claims AUTHORITY for the domain"
-echo "    - Query time: sub-millisecond (no network round-trip)"
-echo "    - SERVER: ${CP_IP} (answered by THIS node's CoreDNS)"
-
-pause "Next: external DNS forwarding"
-
-# ═══════════════════════════════════════════════════════════════════
-#  6. External DNS Forwarding
-# ═══════════════════════════════════════════════════════════════════
-
-header "6. External DNS Forwarding"
-
-echo "  Domains CoreDNS doesn't own are forwarded to upstream DNS."
-echo "  Notice: no 'aa' flag, higher query time (network round-trip)."
-echo ""
-show_cmd "${CLI} exec ${CP_NODE} dig google.com @${CP_IP}"
-
-pause
-
-$CLI exec "$CP_NODE" dig "google.com" "@${CP_IP}" 2>/dev/null
-
-echo ""
-echo "  Contrast with local resolution:"
-echo "    Local:    aa flag, ~0ms query time, authoritative"
-echo "    External: no aa flag, higher query time, recursive answer"
-
-pause "Next: DNS caching"
-
-# ═══════════════════════════════════════════════════════════════════
-#  7. DNS Caching
-# ═══════════════════════════════════════════════════════════════════
-
-header "7. DNS Caching"
-
-echo "  CoreDNS caches upstream responses (30s TTL from the catch-all block)."
-echo "  We can verify caching via native Prometheus metrics — no log parsing."
-echo ""
-
-CACHE_DOMAIN="github.com"
-
-echo "  First, check current cache counters:"
-show_cmd "${CLI} exec ${CP_NODE} curl -s http://127.0.0.1:9153/metrics | grep coredns_cache"
-
-pause
-
-BEFORE_HITS=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_hits_total" | awk '{sum+=$2} END {printf "%.0f", sum}')
-BEFORE_MISSES=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_misses_total" | awk '{sum+=$2} END {printf "%.0f", sum}')
-echo -e "  Cache hits:   ${_GREEN}${BEFORE_HITS:-0}${_RESET}"
-echo -e "  Cache misses: ${_GREEN}${BEFORE_MISSES:-0}${_RESET}"
-
-echo ""
-echo "  Query 1 (will be forwarded, then cached):"
-show_cmd "${CLI} exec ${CP_NODE} dig +short ${CACHE_DOMAIN} @${CP_IP}"
-
-pause
-
-$CLI exec "$CP_NODE" dig +short +timeout=3 "$CACHE_DOMAIN" "@${CP_IP}" 2>/dev/null
-echo ""
-
-echo "  Query 2 (should be served from cache):"
-show_cmd "${CLI} exec ${CP_NODE} dig +short ${CACHE_DOMAIN} @${CP_IP}"
-
-pause
-
-$CLI exec "$CP_NODE" dig +short +timeout=3 "$CACHE_DOMAIN" "@${CP_IP}" 2>/dev/null
-echo ""
-
-echo "  Check cache counters again:"
-
-AFTER_HITS=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_hits_total" | awk '{sum+=$2} END {printf "%.0f", sum}')
-AFTER_MISSES=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_misses_total" | awk '{sum+=$2} END {printf "%.0f", sum}')
-echo -e "  Cache hits:   ${_GREEN}${AFTER_HITS:-0}${_RESET}  (was ${BEFORE_HITS:-0})"
-echo -e "  Cache misses: ${_GREEN}${AFTER_MISSES:-0}${_RESET}  (was ${BEFORE_MISSES:-0})"
-echo ""
-echo "  Cache verification via Prometheus metrics — no log files needed."
-
 pause "Next: DNS separation"
 
 # ═══════════════════════════════════════════════════════════════════
-#  8. DNS Separation — kube-dns vs Custom CoreDNS
+#  4. DNS Separation — kube-dns vs Custom CoreDNS
 # ═══════════════════════════════════════════════════════════════════
 
-header "8. DNS Separation — kube-dns vs Custom CoreDNS"
+header "4. DNS Separation — kube-dns vs Custom CoreDNS"
 
 echo "  Two CoreDNS instances handle different domains:"
 echo "    - kube-dns (Deployment): *.svc.cluster.local"
@@ -349,10 +231,10 @@ echo "  Our custom CoreDNS never saw them."
 pause "Next: native Prometheus metrics"
 
 # ═══════════════════════════════════════════════════════════════════
-#  9. Native Prometheus Metrics (CoreDNS Differentiator)
+#  5. Native Prometheus Metrics (CoreDNS Differentiator)
 # ═══════════════════════════════════════════════════════════════════
 
-header "9. Native Prometheus Metrics"
+header "5. Native Prometheus Metrics"
 
 echo "  CoreDNS has built-in Prometheus metrics at :9153 — no custom exporter."
 echo "  This is a key advantage: per-zone counters, response codes, latency"
@@ -386,13 +268,56 @@ echo ""
 echo "  All of this is built into CoreDNS — zero additional code."
 echo "  Compare: dnsmasq needs a custom Go exporter to get basic metrics."
 
+pause "Next: cache observability"
+
+# ═══════════════════════════════════════════════════════════════════
+#  6. Cache Observability via Prometheus
+# ═══════════════════════════════════════════════════════════════════
+
+header "6. Cache Observability via Prometheus"
+
+echo "  CoreDNS exposes cache hit/miss counters as native Prometheus metrics."
+echo "  No log file parsing needed — contrast with dnsmasq where cache"
+echo "  verification requires reading /var/log/dnsmasq.log."
+echo ""
+
+echo "  Current cache counters:"
+show_cmd "${CLI} exec ${CP_NODE} curl -s http://127.0.0.1:9153/metrics | grep coredns_cache"
+
+pause
+
+BEFORE_HITS=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_hits_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
+BEFORE_MISSES=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_misses_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
+echo -e "  Cache hits:   ${_GREEN}${BEFORE_HITS:-0}${_RESET}"
+echo -e "  Cache misses: ${_GREEN}${BEFORE_MISSES:-0}${_RESET}"
+
+echo ""
+echo "  Generate two queries to the same external domain:"
+show_cmd "${CLI} exec ${CP_NODE} dig +short github.com @${CP_IP}"
+
+pause
+
+$CLI exec "$CP_NODE" dig +short +timeout=3 "github.com" "@${CP_IP}" 2>/dev/null
+$CLI exec "$CP_NODE" dig +short +timeout=3 "github.com" "@${CP_IP}" 2>/dev/null
+echo ""
+
+echo "  Check cache counters again — hits should have incremented:"
+
+AFTER_HITS=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_hits_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
+AFTER_MISSES=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_misses_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
+echo -e "  Cache hits:   ${_GREEN}${AFTER_HITS:-0}${_RESET}  (was ${BEFORE_HITS:-0})"
+echo -e "  Cache misses: ${_GREEN}${AFTER_MISSES:-0}${_RESET}  (was ${BEFORE_MISSES:-0})"
+echo ""
+echo "  Cache verification via Prometheus metrics — no log files needed."
+echo "  These counters feed directly into Grafana dashboards and alert rules."
+
 pause "Next: dashboards & alerts"
 
 # ═══════════════════════════════════════════════════════════════════
-#  10. Dashboards & Alerts
+#  7. Dashboards & Alerts
 # ═══════════════════════════════════════════════════════════════════
 
-header "10. Grafana & Prometheus Dashboards"
+header "7. Grafana & Prometheus Dashboards"
 
 echo "  Port-forwards should already be running from 'make demo'."
 echo ""
@@ -416,30 +341,13 @@ echo "    - CoreDNSLatencyP99High (warning) — p99 > 100ms for 5m"
 echo "    - CoreDNSCacheHitRateLow (info) — cache hit rate < 50% for 10m"
 echo "    - CoreDNSAvailabilitySLOBreach (critical) — availability < 99.9% for 5m"
 
-pause "Next: DNS failover demo"
-
-# ═══════════════════════════════════════════════════════════════════
-#  11. DNS Failover
-# ═══════════════════════════════════════════════════════════════════
-
-header "11. DNS Failover Demo"
-
-echo "  This runs the interactive failover script that blocks upstream DNS"
-echo "  and proves cluster domains survive the outage."
-echo ""
-show_cmd "make -C ${REPO_DIR} demo-failover"
-
-pause "Run the failover demo?"
-
-"${SCRIPT_DIR}/demo-failover.sh"
-
 pause "Next: traffic generation"
 
 # ═══════════════════════════════════════════════════════════════════
-#  12. Traffic Generation
+#  8. DNS Traffic Generation
 # ═══════════════════════════════════════════════════════════════════
 
-header "12. DNS Traffic Generation"
+header "8. DNS Traffic Generation"
 
 echo "  Start continuous DNS traffic to populate the Grafana dashboard"
 echo "  with dense, realistic data across all nodes."
@@ -466,10 +374,10 @@ echo "    - Cache Hit Rate stabilizing around 60-70%"
 pause "Next: static pod resilience"
 
 # ═══════════════════════════════════════════════════════════════════
-#  13. Static Pod Resilience (CoreDNS Headline Feature)
+#  9. Static Pod Resilience (CoreDNS Headline Feature)
 # ═══════════════════════════════════════════════════════════════════
 
-header "13. Static Pod Resilience"
+header "9. Static Pod Resilience"
 
 echo "  Static pods are managed by kubelet, not a Deployment controller."
 echo "  When the process crashes, kubelet auto-restarts it within seconds."
@@ -557,7 +465,7 @@ else
 
     # ── Sustained failure (manifest removal) ──────────────────────
 
-    header "13b. Sustained Failure — Manifest Removal"
+    header "9b. Sustained Failure — Manifest Removal"
 
     echo "  To permanently stop a static pod, remove its manifest file."
     echo "  kubelet stops watching for it and the pod disappears."
@@ -622,12 +530,12 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-#  14. Stop Traffic & Wrap Up
+#  10. Stop Traffic & Wrap Up
 # ═══════════════════════════════════════════════════════════════════
 
 pause "Next: wrap up"
 
-header "14. Wrap Up"
+header "10. Wrap Up"
 
 echo "  Stopping the traffic generator."
 show_cmd "make -C ${REPO_DIR} traffic-stop"
@@ -641,6 +549,19 @@ header "Walkthrough Complete"
 echo "  Dashboards still running:"
 echo "    Grafana:     http://localhost:${GRAFANA_PORT}"
 echo "    Prometheus:  http://localhost:${PROMETHEUS_PORT}"
+echo ""
+echo "  What this walkthrough covered (CoreDNS differentiators):"
+echo "    - Static pod architecture (kubelet-managed, not a Deployment)"
+echo "    - Two CoreDNS instances (kube-dns + coredns-local)"
+echo "    - Per-zone Corefile with independent prometheus directives"
+echo "    - DNS separation (cluster.local vs custom domains)"
+echo "    - Native Prometheus metrics (requests, responses, latency)"
+echo "    - Cache observability via metrics (no log parsing)"
+echo "    - Self-healing resilience (kill → auto-restart)"
+echo "    - Manifest-based lifecycle (remove → stop, restore → start)"
+echo ""
+echo "  DNS resolution basics (domain checks, forwarding, caching"
+echo "  behavior, failover) are covered in the dnsmasq walkthrough."
 echo ""
 echo "  To tear down: make clean"
 echo ""

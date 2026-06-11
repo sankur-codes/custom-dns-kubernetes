@@ -148,6 +148,11 @@ grafana-ui: ## Open Grafana UI (foreground, port-forward)
 	@kubectl port-forward -n monitoring svc/grafana $(GRAFANA_PORT):3000 --context kind-$(CLUSTER_NAME)
 
 port-forward: ## Start Prometheus + Grafana port-forwards in background
+	@echo "Waiting for monitoring pods to be ready..."
+	@kubectl wait --for=condition=Ready pod -l app=prometheus -n monitoring \
+		--context kind-$(CLUSTER_NAME) --timeout=120s 2>/dev/null || true
+	@kubectl wait --for=condition=Ready pod -l app=grafana -n monitoring \
+		--context kind-$(CLUSTER_NAME) --timeout=120s 2>/dev/null || true
 	@for PF in prometheus grafana; do \
 		PIDFILE="/tmp/$${PF}-pf-$(CLUSTER_NAME).pid"; \
 		if [ -f "$$PIDFILE" ] && kill -0 $$(cat "$$PIDFILE") 2>/dev/null; then \
