@@ -140,7 +140,7 @@ data:
       - alert: CoreDNSForwardLatencyP99High
         expr: |
           histogram_quantile(0.99,
-            sum by (le, node) (rate(coredns_forward_request_duration_seconds_bucket{job="coredns-local"}[5m]))
+            sum by (le, node) (rate(coredns_proxy_request_duration_seconds_bucket{job="coredns-local",proxy_name="forward"}[5m]))
           ) > 0.5
         for: 5m
         labels:

@@ -296,15 +296,15 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(coredns_forward_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(coredns_proxy_request_duration_seconds_bucket{job=\"coredns-local\",proxy_name=\"forward\"}[5m])))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(coredns_forward_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(coredns_proxy_request_duration_seconds_bucket{job=\"coredns-local\",proxy_name=\"forward\"}[5m])))",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_forward_request_duration_seconds_bucket{job=\"coredns-local\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_proxy_request_duration_seconds_bucket{job=\"coredns-local\",proxy_name=\"forward\"}[5m])))",
           "legendFormat": "p99"
         }
       ]
@@ -363,7 +363,7 @@
       "title": "Forward Requests/sec by Upstream",
       "type": "timeseries",
       "targets": [{
-        "expr": "sum by (to) (rate(coredns_forward_requests_total{job=\"coredns-local\"}[5m]))",
+        "expr": "sum by (to) (rate(coredns_proxy_request_duration_seconds_count{job=\"coredns-local\",proxy_name=\"forward\"}[5m]))",
         "legendFormat": "{{ to }}"
       }]
     }

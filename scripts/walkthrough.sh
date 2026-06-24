@@ -61,21 +61,22 @@ echo "  Worker:      ${WORKER_NODE} (${WORKER_IP})"
 echo "  Prometheus:  http://localhost:${PROMETHEUS_PORT}"
 echo "  Grafana:     http://localhost:${GRAFANA_PORT}"
 echo ""
-echo "  This walkthrough focuses on CoreDNS differentiators:"
-echo "    - Static pod architecture & kubelet management"
-echo "    - Native Prometheus observability (per-zone, latency, cache)"
-echo "    - Self-healing resilience (process kill, manifest removal)"
-echo ""
-echo "  DNS resolution basics (domain checks, forwarding, caching,"
-echo "  failover) are covered in the dnsmasq walkthrough."
+echo "  This walkthrough covers the CoreDNS static pod approach:"
+echo "    1. Cluster overview & static pod architecture"
+echo "    2. Two CoreDNS instances — kube-dns vs coredns-local"
+echo "    3. Corefile configuration with per-zone server blocks"
+echo "    4. Built-in Prometheus metrics (no exporter needed)"
+echo "    5. Grafana dashboard & traffic generation"
+echo "    6. Static pod resilience (self-healing & manifest lifecycle)"
+echo "    7. Wrap up"
 
 pause "Start the walkthrough?"
 
 # ═══════════════════════════════════════════════════════════════════
-#  1. Cluster Overview
+#  1. Cluster Overview & Static Pod Architecture
 # ═══════════════════════════════════════════════════════════════════
 
-header "1. Cluster Overview"
+header "1. Cluster Overview & Static Pod Architecture"
 
 echo "  Show the Kind cluster nodes and the custom CoreDNS static pods."
 echo ""
@@ -96,12 +97,20 @@ kubectl get pods -n kube-system -l app=coredns-local -o wide --context "$KUBE_CO
 
 echo ""
 echo "  These are static pods — managed directly by kubelet, not by a Deployment."
+echo "  kubelet watches a manifest file on each node's filesystem."
 echo "  They survive API server outages and auto-restart if they crash."
+echo ""
+echo "  The static pod manifest on each node:"
+show_cmd "${CLI} exec ${CP_NODE} cat /etc/kubernetes/manifests/coredns-local.yaml"
 
-pause "Next: two CoreDNS instances — side by side"
+pause
+
+$CLI exec "$CP_NODE" cat /etc/kubernetes/manifests/coredns-local.yaml
+
+pause "Next: two CoreDNS instances"
 
 # ═══════════════════════════════════════════════════════════════════
-#  2. Two CoreDNS Instances — Side by Side
+#  2. Two CoreDNS Instances — kube-dns vs coredns-local
 # ═══════════════════════════════════════════════════════════════════
 
 header "2. Two CoreDNS Instances in This Cluster"
@@ -109,9 +118,10 @@ header "2. Two CoreDNS Instances in This Cluster"
 echo "  This cluster runs TWO separate CoreDNS instances:"
 echo ""
 echo "    1. kube-dns (Deployment) — handles *.svc.cluster.local"
-echo "    2. coredns-local (Static Pods) — handles custom infrastructure domains"
+echo "       Standard Kubernetes DNS, managed by the control plane."
 echo ""
-echo "  Let's see them side by side."
+echo "    2. coredns-local (Static Pods) — handles custom infrastructure domains"
+echo "       Our custom DNS layer, managed by kubelet on each node."
 echo ""
 
 echo "  The kube-dns Deployment (standard Kubernetes DNS):"
@@ -138,9 +148,9 @@ pause
 kubectl get pods -n kube-system -o wide --context "$KUBE_CONTEXT"
 
 echo ""
-echo "  Key difference: the coredns-local pods have node names in their pod name"
-echo "  (e.g., coredns-local-${CP_NODE}). They are NOT managed by any Deployment"
-echo "  or DaemonSet — kubelet watches the manifest file on each node."
+echo "  The coredns-local pods have node names in their pod name"
+echo "  (e.g., coredns-local-${CP_NODE}). They are NOT managed by any"
+echo "  Deployment or DaemonSet — kubelet watches the manifest file on each node."
 
 pause "Next: Corefile configuration"
 
@@ -150,7 +160,7 @@ pause "Next: Corefile configuration"
 
 header "3. Corefile Configuration"
 
-echo "  The Corefile defines per-zone server blocks. Each zone has its own"
+echo "  The Corefile defines per-zone server blocks. Each zone gets its own"
 echo "  'prometheus' directive, giving us independent metrics per domain."
 echo "  The 'template' plugin synthesizes DNS records on the fly."
 echo ""
@@ -162,83 +172,34 @@ $CLI exec "$CP_NODE" cat /etc/coredns/Corefile
 
 echo ""
 echo "  Four server blocks:"
-echo "    - api.${DOMAIN}       → control-plane IP (template plugin)"
-echo "    - api-int.${DOMAIN}   → control-plane IP (template plugin)"
-echo "    - apps.${DOMAIN}      → ingress IP (regex wildcard match)"
-echo "    - . (catch-all)       → forwards to upstream DNS, caches 30s"
+echo "    - api.${DOMAIN}       -> control-plane IP (template plugin)"
+echo "    - api-int.${DOMAIN}   -> control-plane IP (template plugin)"
+echo "    - apps.${DOMAIN}      -> ingress IP (regex wildcard match)"
+echo "    - . (catch-all)       -> forwards to upstream DNS, caches 30s"
 echo ""
 echo "  Each block includes 'prometheus' — per-zone metrics with zero config."
+echo "  This is a key difference from dnsmasq: CoreDNS natively exposes"
+echo "  Prometheus metrics at :9153 without needing a custom exporter."
 
-pause "Next: DNS separation"
-
-# ═══════════════════════════════════════════════════════════════════
-#  4. DNS Separation — kube-dns vs Custom CoreDNS
-# ═══════════════════════════════════════════════════════════════════
-
-header "4. DNS Separation — kube-dns vs Custom CoreDNS"
-
-echo "  Two CoreDNS instances handle different domains:"
-echo "    - kube-dns (Deployment): *.svc.cluster.local"
-echo "    - coredns-local (Static Pod): api.${DOMAIN}, *.apps.${DOMAIN}, etc."
-echo ""
-echo "  Queries from a pod go through kube-dns first. kube-dns handles"
-echo "  cluster.local domains itself. For custom domains, kube-dns forwards"
-echo "  to the node's CoreDNS static pod."
-echo ""
-
-echo "  Query a Kubernetes service FROM A POD (resolved by kube-dns):"
-show_cmd "kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local"
-
-pause
-
-kubectl exec dns-test --context "$KUBE_CONTEXT" -- nslookup kubernetes.default.svc.cluster.local 2>/dev/null || true
-
-echo ""
-echo "  Query a custom domain FROM A POD (forwarded by kube-dns to our static pod):"
-show_cmd "kubectl exec dns-test -- nslookup api.${DOMAIN}"
-
-pause
-
-kubectl exec dns-test --context "$KUBE_CONTEXT" -- nslookup "api.${DOMAIN}" 2>/dev/null || true
-
-# Brief pause for metrics to update
-sleep 1
-
-echo ""
-echo "  Now check our custom CoreDNS metrics on all nodes — cluster.local"
-echo "  queries don't appear in the zone counters:"
-echo ""
-
-pause
-
-for NODE in $NODES; do
-    NODE_IP=$($CLI inspect "$NODE" \
-        --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
-    echo -e "  ${_BOLD}${NODE} (${NODE_IP}):${_RESET}"
-    METRICS=$($CLI exec "$NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_dns_requests_total" | head -10 || true)
-    if [ -n "$METRICS" ]; then
-        echo "$METRICS" | while read -r line; do echo "    $line"; done
-    else
-        echo "    (no queries received yet)"
-    fi
-    echo ""
-done
-
-echo "  Notice: zones are api.${DOMAIN}, apps.${DOMAIN}, and '.' (catch-all)."
-echo "  There is NO cluster.local zone — kube-dns handled those queries."
-echo "  Our custom CoreDNS never saw them."
-
-pause "Next: native Prometheus metrics"
+pause "Next: built-in Prometheus metrics"
 
 # ═══════════════════════════════════════════════════════════════════
-#  5. Native Prometheus Metrics (CoreDNS Differentiator)
+#  4. Built-in Prometheus Metrics (No Exporter Needed)
 # ═══════════════════════════════════════════════════════════════════
 
-header "5. Native Prometheus Metrics"
+header "4. Built-in Prometheus Metrics (No Exporter Needed)"
 
-echo "  CoreDNS has built-in Prometheus metrics at :9153 — no custom exporter."
-echo "  This is a key advantage: per-zone counters, response codes, latency"
-echo "  histograms, and cache stats are all available out of the box."
+echo "  CoreDNS has a native 'prometheus' plugin — every CoreDNS binary"
+echo "  exposes metrics at :9153 out of the box. No sidecar, no exporter"
+echo "  binary, no log parsing. Just add 'prometheus' to the Corefile."
+echo ""
+echo "  Available metrics (all built-in):"
+echo "    coredns_dns_requests_total        — per zone, per type, per node"
+echo "    coredns_dns_responses_total       — per rcode (NOERROR, NXDOMAIN, SERVFAIL)"
+echo "    coredns_dns_request_duration_seconds — latency histogram (p50/p95/p99)"
+echo "    coredns_cache_hits_total          — cache hits by type (success/denial)"
+echo "    coredns_cache_misses_total        — cache misses"
+echo "    coredns_proxy_request_duration_seconds — upstream forward latency histogram"
 echo ""
 
 echo "  Per-zone request counters:"
@@ -265,92 +226,42 @@ pause
 $CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_dns_request_duration_seconds" | head -15
 
 echo ""
-echo "  All of this is built into CoreDNS — zero additional code."
-echo "  Compare: dnsmasq needs a custom Go exporter to get basic metrics."
+echo "  Compare with dnsmasq: there, we needed a custom Go exporter that"
+echo "  queries CHAOS TXT records and parses log files. Here, CoreDNS"
+echo "  provides everything natively — Prometheus just scrapes :9153."
 
-pause "Next: cache observability"
-
-# ═══════════════════════════════════════════════════════════════════
-#  6. Cache Observability via Prometheus
-# ═══════════════════════════════════════════════════════════════════
-
-header "6. Cache Observability via Prometheus"
-
-echo "  CoreDNS exposes cache hit/miss counters as native Prometheus metrics."
-echo "  No log file parsing needed — contrast with dnsmasq where cache"
-echo "  verification requires reading /var/log/dnsmasq.log."
-echo ""
-
-echo "  Current cache counters:"
-show_cmd "${CLI} exec ${CP_NODE} curl -s http://127.0.0.1:9153/metrics | grep coredns_cache"
-
-pause
-
-BEFORE_HITS=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_hits_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
-BEFORE_MISSES=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_misses_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
-echo -e "  Cache hits:   ${_GREEN}${BEFORE_HITS:-0}${_RESET}"
-echo -e "  Cache misses: ${_GREEN}${BEFORE_MISSES:-0}${_RESET}"
-
-echo ""
-echo "  Generate two queries to the same external domain:"
-show_cmd "${CLI} exec ${CP_NODE} dig +short github.com @${CP_IP}"
-
-pause
-
-$CLI exec "$CP_NODE" dig +short +timeout=3 "github.com" "@${CP_IP}" 2>/dev/null
-$CLI exec "$CP_NODE" dig +short +timeout=3 "github.com" "@${CP_IP}" 2>/dev/null
-echo ""
-
-echo "  Check cache counters again — hits should have incremented:"
-
-AFTER_HITS=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_hits_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
-AFTER_MISSES=$($CLI exec "$CP_NODE" curl -s http://127.0.0.1:9153/metrics 2>/dev/null | grep "^coredns_cache_misses_total" | awk '{sum+=$2} END {printf "%.0f", sum}' || true)
-echo -e "  Cache hits:   ${_GREEN}${AFTER_HITS:-0}${_RESET}  (was ${BEFORE_HITS:-0})"
-echo -e "  Cache misses: ${_GREEN}${AFTER_MISSES:-0}${_RESET}  (was ${BEFORE_MISSES:-0})"
-echo ""
-echo "  Cache verification via Prometheus metrics — no log files needed."
-echo "  These counters feed directly into Grafana dashboards and alert rules."
-
-pause "Next: dashboards & alerts"
+pause "Next: Grafana dashboard & traffic"
 
 # ═══════════════════════════════════════════════════════════════════
-#  7. Dashboards & Alerts
+#  5. Grafana Dashboard & Traffic Generation
 # ═══════════════════════════════════════════════════════════════════
 
-header "7. Grafana & Prometheus Dashboards"
+header "5. Grafana Dashboard & Traffic Generation"
 
+echo "  The Grafana dashboard visualizes all the native CoreDNS metrics."
 echo "  Port-forwards should already be running from 'make demo'."
 echo ""
 echo -e "  ${_BOLD}Grafana:${_RESET}     http://localhost:${GRAFANA_PORT}"
-echo "               Navigate to Dashboards -> CoreDNS dashboard"
+echo "               Navigate to Dashboards -> CoreDNS - Custom DNS Observability"
 echo ""
 echo -e "  ${_BOLD}Prometheus:${_RESET}  http://localhost:${PROMETHEUS_PORT}"
 echo "               Navigate to Alerts to see configured alert rules"
 echo ""
-echo "  Key Grafana panels:"
-echo "    - Total QPS, Instances Up, Cache Hit Rate, Error Rate"
-echo "    - SLI/SLO: Availability (99.9% target), Latency (99% < 100ms)"
-echo "    - QPS by Zone: separate lines for each domain zone"
-echo "    - Latency by Zone: p50/p95/p99 per domain"
-echo "    - Responses by Code: NOERROR, NXDOMAIN, SERVFAIL breakdown"
+echo "  Dashboard panels:"
+echo "    Overview:  Total QPS, Error Rate, Instances Up, Cache Hit Rate"
+echo "    SLI/SLO:   Availability (99.9%), Latency (99% < 100ms), p99 Latency"
+echo "    Queries:   QPS by Zone, Responses by Code, QPS by Node, QPS by Type"
+echo "    Latency:   Request Latency (p50/p95/p99), Forward Latency, Latency by Zone"
+echo "    Cache:     Cache Hits vs Misses, Forward Requests by Upstream"
 echo ""
-echo "  Prometheus alert rules:"
+echo "  Prometheus alerts:"
 echo "    - CoreDNSDown (critical) — instance unreachable for 1m"
 echo "    - CoreDNSHighSERVFAILRate (warning) — SERVFAIL > 1% for 5m"
 echo "    - CoreDNSLatencyP99High (warning) — p99 > 100ms for 5m"
 echo "    - CoreDNSCacheHitRateLow (info) — cache hit rate < 50% for 10m"
 echo "    - CoreDNSAvailabilitySLOBreach (critical) — availability < 99.9% for 5m"
-
-pause "Next: traffic generation"
-
-# ═══════════════════════════════════════════════════════════════════
-#  8. DNS Traffic Generation
-# ═══════════════════════════════════════════════════════════════════
-
-header "8. DNS Traffic Generation"
-
-echo "  Start continuous DNS traffic to populate the Grafana dashboard"
-echo "  with dense, realistic data across all nodes."
+echo ""
+echo "  Let's start DNS traffic to see the dashboard come alive."
 echo ""
 echo "  Traffic mix per batch (every 2s):"
 echo "    10 local domains, 8 cached external, 5 unique external,"
@@ -365,19 +276,21 @@ make -C "$REPO_DIR" traffic
 echo ""
 echo -e "  ${_BOLD}Check the Grafana dashboard now:${_RESET} http://localhost:${GRAFANA_PORT}"
 echo ""
-echo "  Watch for:"
-echo "    - Total QPS increasing"
-echo "    - QPS by Zone: separate lines for api.*, apps.*, and '.' zones"
-echo "    - Latency by Zone: local zones near 0, catch-all zone higher"
-echo "    - Cache Hit Rate stabilizing around 60-70%"
+echo "  Watch for these changes on the dashboard:"
+echo "    - Total QPS ramping up"
+echo "    - QPS by Zone: separate lines for api.*, apps.*, and '.' (catch-all)"
+echo "    - Latency by Zone: local zones near 0ms, catch-all higher (upstream round-trip)"
+echo "    - Responses by Code: NOERROR dominant, NXDOMAIN for bad domains"
+echo "    - Cache Hit Rate climbing as repeated queries hit the cache"
+echo "    - Forward Requests showing traffic to upstream DNS servers"
 
 pause "Next: static pod resilience"
 
 # ═══════════════════════════════════════════════════════════════════
-#  9. Static Pod Resilience (CoreDNS Headline Feature)
+#  6. Static Pod Resilience
 # ═══════════════════════════════════════════════════════════════════
 
-header "9. Static Pod Resilience"
+header "6. Static Pod Resilience"
 
 echo "  Static pods are managed by kubelet, not a Deployment controller."
 echo "  When the process crashes, kubelet auto-restarts it within seconds."
@@ -424,6 +337,9 @@ else
     fi
 
     echo ""
+    echo -e "  ${_BOLD}Check Grafana now:${_RESET} http://localhost:${GRAFANA_PORT}"
+    echo "  'Instances Up' should momentarily drop from 3 to 2."
+    echo ""
     echo "  Step 4: Wait for kubelet to auto-restart the static pod..."
     echo "  (kubelet detects the exit and restarts within ~5 seconds)"
 
@@ -456,16 +372,19 @@ else
     AFTER_RESTARTS=$(kubectl get pods -n kube-system -l app=coredns-local --context "$KUBE_CONTEXT" \
         --field-selector "spec.nodeName=${WORKER_NODE}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
     echo ""
-    echo -e "  RESTARTS before: ${BEFORE_RESTARTS} → after: ${_GREEN}${AFTER_RESTARTS}${_RESET}"
+    echo -e "  RESTARTS before: ${BEFORE_RESTARTS} -> after: ${_GREEN}${AFTER_RESTARTS}${_RESET}"
     echo ""
     echo "  kubelet IS the watchdog. No systemd, no supervisor, no external process."
     echo "  The static pod self-healed within seconds."
+    echo ""
+    echo "  On Grafana, 'Instances Up' should already be back to 3."
+    echo "  The 'CoreDNSRestarted' alert may have fired briefly."
 
     pause "Next: sustained failure via manifest removal"
 
     # ── Sustained failure (manifest removal) ──────────────────────
 
-    header "9b. Sustained Failure — Manifest Removal"
+    header "6b. Sustained Failure — Manifest Removal"
 
     echo "  To permanently stop a static pod, remove its manifest file."
     echo "  kubelet stops watching for it and the pod disappears."
@@ -523,19 +442,19 @@ else
     fi
 
     echo ""
-    echo "  Summary:"
-    echo "    - Kill process → kubelet auto-restarts in seconds (self-healing)"
-    echo "    - Remove manifest → pod stops permanently (controlled shutdown)"
-    echo "    - Restore manifest → pod comes back (controlled start)"
+    echo "  Resilience summary:"
+    echo "    - Kill process  -> kubelet auto-restarts in seconds (self-healing)"
+    echo "    - Remove manifest -> pod stops permanently (controlled shutdown)"
+    echo "    - Restore manifest -> pod comes back (controlled start)"
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-#  10. Stop Traffic & Wrap Up
+#  7. Stop Traffic & Wrap Up
 # ═══════════════════════════════════════════════════════════════════
 
 pause "Next: wrap up"
 
-header "10. Wrap Up"
+header "7. Wrap Up"
 
 echo "  Stopping the traffic generator."
 show_cmd "make -C ${REPO_DIR} traffic-stop"
@@ -549,19 +468,6 @@ header "Walkthrough Complete"
 echo "  Dashboards still running:"
 echo "    Grafana:     http://localhost:${GRAFANA_PORT}"
 echo "    Prometheus:  http://localhost:${PROMETHEUS_PORT}"
-echo ""
-echo "  What this walkthrough covered (CoreDNS differentiators):"
-echo "    - Static pod architecture (kubelet-managed, not a Deployment)"
-echo "    - Two CoreDNS instances (kube-dns + coredns-local)"
-echo "    - Per-zone Corefile with independent prometheus directives"
-echo "    - DNS separation (cluster.local vs custom domains)"
-echo "    - Native Prometheus metrics (requests, responses, latency)"
-echo "    - Cache observability via metrics (no log parsing)"
-echo "    - Self-healing resilience (kill → auto-restart)"
-echo "    - Manifest-based lifecycle (remove → stop, restore → start)"
-echo ""
-echo "  DNS resolution basics (domain checks, forwarding, caching"
-echo "  behavior, failover) are covered in the dnsmasq walkthrough."
 echo ""
 echo "  To tear down: make clean"
 echo ""

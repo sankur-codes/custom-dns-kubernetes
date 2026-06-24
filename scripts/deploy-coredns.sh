@@ -81,9 +81,13 @@ echo "$NODES" | while read -r NODE; do
     NODE_IP=$($CLI inspect "$NODE" \
         --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
 
-    # Capture the original upstream DNS before we touch anything
+    # Capture the original upstream DNS (use saved backup if available to avoid loop on re-deploy)
     UPSTREAM=$($CLI exec "$NODE" \
-        sh -c "grep '^nameserver' /etc/resolv.conf | head -1 | awk '{print \$2}'" 2>/dev/null)
+        sh -c "grep '^nameserver' /etc/resolv.conf.upstream 2>/dev/null | head -1 | awk '{print \$2}'" 2>/dev/null)
+    if [ -z "$UPSTREAM" ]; then
+        UPSTREAM=$($CLI exec "$NODE" \
+            sh -c "grep '^nameserver' /etc/resolv.conf | head -1 | awk '{print \$2}'" 2>/dev/null)
+    fi
 
     if [ -z "$UPSTREAM" ]; then
         UPSTREAM="8.8.8.8"

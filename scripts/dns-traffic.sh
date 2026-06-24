@@ -56,11 +56,11 @@ fi
 
 TRAFFIC_INTERVAL="${TRAFFIC_INTERVAL:-2}"
 TRAFFIC_LOCAL_COUNT="${TRAFFIC_LOCAL_COUNT:-10}"
-TRAFFIC_CACHED_COUNT="${TRAFFIC_CACHED_COUNT:-8}"
-TRAFFIC_FORWARD_COUNT="${TRAFFIC_FORWARD_COUNT:-5}"
+TRAFFIC_CACHED_COUNT="${TRAFFIC_CACHED_COUNT:-15}"
+TRAFFIC_FORWARD_COUNT="${TRAFFIC_FORWARD_COUNT:-3}"
 TRAFFIC_NXDOMAIN_COUNT="${TRAFFIC_NXDOMAIN_COUNT:-3}"
 TRAFFIC_EVICT_COUNT="${TRAFFIC_EVICT_COUNT:-0}"
-TRAFFIC_CLUSTER_COUNT="${TRAFFIC_CLUSTER_COUNT:-4}"
+TRAFFIC_CLUSTER_COUNT="${TRAFFIC_CLUSTER_COUNT:-3}"
 TRAFFIC_STATS_EVERY="${TRAFFIC_STATS_EVERY:-10}"
 
 # ── PID file + signal handling ─────────────────────────────────────
@@ -118,7 +118,7 @@ LOCAL_DOMAINS=(
     "prometheus.apps.${DOMAIN}"
 )
 
-QUERY_TYPES=(A AAAA MX TXT)
+QUERY_TYPES=(A)
 
 CACHED_DOMAINS=(
     google.com github.com reddit.com cloudflare.com amazon.com
@@ -202,10 +202,11 @@ while (( RUNNING )); do
     done
 
     # Category 2: Repeated external domains (cache hits after first batch)
+    # Pin each domain to a consistent node so repeated queries hit the same cache
     for ((i=0; i<TRAFFIC_CACHED_COUNT && RUNNING; i++)); do
-        next_node
         domain="${CACHED_DOMAINS[$((i % ${#CACHED_DOMAINS[@]}))]}"
-        send_query "$CURRENT_NODE" "$CURRENT_IP" "$domain" "A"
+        pin_idx=$((i % ${#CACHED_DOMAINS[@]} % NODE_COUNT))
+        send_query "${NODE_NAMES[$pin_idx]}" "${NODE_IPS[$pin_idx]}" "$domain" "A"
         CAT_CACHED=$((CAT_CACHED + 1))
     done
 
